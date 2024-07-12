@@ -1,0 +1,422 @@
+---
+title: "Airline customer satisfaction project"
+date: "2023-03-29"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: true
+classoption: a4paper
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=10, fig.height=10,echo = TRUE)
+library(tidyverse)
+library(MASS)
+library(ggplot2)
+library(corrplot)
+library(FactoMineR)
+library(factoextra)
+library(RColorBrewer)
+library(doBy)
+library(ROCR)
+library(NbClust)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+set.seed(6)
+```
+
+# Introduction 
+
+## Data description
+
+This data set contains a survey __on air passenger satisfaction__. The following __classification problem__ is set:
+
+
+It is necessary to predict which of the __two__ levels of satisfaction with the airline the passenger belongs to:
+
+__1. Satisfaction (54.8%)__  
+__2. dissatisfied (45.2%)__
+
+In this project, we will apply various models:  
+__-Logistic regression__  
+__-Factorial Discriminant Analysis__  
+__-Decision Tree__  
+__-RandomForest__  
+
+
+## Variables  
+
+There is the following information about the passengers of some airline:
+
+1. __Gender__: male or female  
+2. __Customer type__: regular or non-regular airline customer *(loyal or disloyal Customer)*  
+3. __Age__: the actual age of the passenger  
+4. __Type of travel__: the purpose of the passenger's flight *(personal or business travel)*  
+5. __Class__: the type of the seat in the plane *(business, economy, economy plus)*  
+6. __Flight distance__: The distance that the costumer will travel  
+7. __Seat comfort__: seat satisfaction level *(0: not rated; 1-5)*  
+8. __Departure/Arrival time convenient__: departure/arrival time satisfaction level *(0: not rated; 1-5)*  
+9. __Food and drink__: food and drink satisfaction level *(0: not rated; 1-5)*  
+10. __Gate location__: level of satisfaction with the gate location *(0: not rated; 1-5)*  
+11. __Inflight wifi service__: satisfaction level with Wi-Fi service on board *(0: not rated; 1-5)*  
+12. __Inflight entertainment__: satisfaction with inflight entertainment *(0: not rated; 1-5)*  
+13. __Online Support__: level of satisfaction of the online guideness *(0: not rated; 1-5)*   
+14. __Ease of Online booking__: online booking satisfaction rate *(0: not rated; 1-5)*  
+15. __On-board service__: level of satisfaction with on-board service *(0: not rated; 1-5)*  
+16. __Leg room service__: level of satisfaction with leg room service *(0: not rated; 1-5)*  
+17. __Baggage handling__: level of satisfaction with baggage handling *(0: not rated; 1-5)*  
+18. __Checkin service__: level of satisfaction with checkin service *(0: not rated; 1-5)*  
+19. __Cleanliness__: level of satisfaction with cleanliness *(0: not rated; 1-5)*  
+20. __Online boarding__: satisfaction level with online boarding *(0: not rated; 1-5)*  
+21. __Departure delay in minutes__   
+22. __Arrival delay in minutes__  
+
+## Loading Data  
+
+```{r}
+df=read.csv("C:/Users/hamed/Desktop/ESSAI/data mining/Invistico_Airline.csv")
+head(df)
+```
+
+
+
+
+
+# Data Manipulation
+
+I created a function to check the NAs values in each column or the data frame  
+```{r}
+stats=function(df){
+    l=c()
+    for(i in 1:length(df)){
+        type=class(df[,i])
+        unique=length(unique(df[,i]))
+        sum_null=sum(is.na(df[,i]))
+        l=append(l,c(colnames(df)[i],type,unique,sum_null))
+    }
+    df_stats=matrix(l,ncol=4,byrow=T)
+    colnames(df_stats)=c('column','type','unique','sum_null')
+    return (df_stats)
+}
+stats(df)
+```
+As we can see, only the last variable __Arrival.Delay.in.Minutes__ which has NAs values, so we will change the NAs with the same value as __Departure.Delay.in.Minutes__ because i noticed that most values of the two variables are equals or close.  
+
+```{r}
+df$Arrival.Delay.in.Minutes=ifelse(is.na(df$Arrival.Delay.in.Minutes),df$Departure.Delay.in.Minutes,df$Arrival.Delay.in.Minutes)
+```
+
+now we check if still any NA values.  
+```{r}
+stats(df)
+```
+
+# General Statistics 
+
+Starting with a full summary of the dataframe.
+
+```{r}
+summary(df)
+```
+
+Next we have some visualizations of certain variables of the dataframe.
+
+```{r}
+data.pie=data.frame(df%>%
+                      group_by(satisfaction)%>%
+                      summarise(count=n()))
+ggplot(data.pie, aes(x="", y=count, fill=satisfaction)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  geom_text(aes(label = count),
+            position = position_stack(vjust = 0.5)) +
+  theme_void()
+```
+
+Here we have the distribution of the __satisfied__ and the __dissatisfied__ clients we can see more satisfied than the dissatisfied ones.
+
+```{r}
+ggplot(df, aes(x=Flight.Distance, fill=satisfaction)) +
+  geom_histogram(alpha=0.5,bins=300,position='identity')
+```
+Here is the distribution of the costumers dependently on the distance of the flight where we have in the majority of the short-distance flights, the clients are satisfied but for the mid-range distance between __1100__ and __2500__, the clients are not satisfied and then for the long-range we have back the dominance of the satisfaction.  
+```{r}
+ggplot(df, aes(x=Flight.Distance, fill=Customer.Type)) +
+  geom_histogram(alpha=0.5,bins=300,position='identity')
+```
+Here for the loyalty of the customers, we have the majority of the customers are loyal for the company and the majority of the disloyal customers are getting mid-range flights.  
+
+```{r}
+ggplot(df, aes(x=Age, color=satisfaction)) +geom_density()
+```
+
+for ages, we have mostly independence between satisfaction and the age factor, except for the range of ages between __38__ and __62__ where we have high satisfaction rate and slightly higher dissatisfaction for younger ages.  
+```{r}
+ggplot(df,aes(x=Class,fill=satisfaction))+geom_bar()
+```
+As u can see, most of the costumers are with __business__ class but most of the dissatisfied costumers are taking the __Eco__ class and just few of them are in __eco plus__ class.  
+
+
+# Analysing Data
+
+## Principal Component Analysis
+
+For this part we will be taking a look on on the PCA but firstly we need to select the categorical variables. for this purpose I created a function to select those variables dependently on the number of unique values.  
+
+```{r}
+discrete= function(x){
+    length(unique(x)) <= 6
+} 
+sapply(df, discrete)
+```
+
+when we look at the __stats__ function we could see that the required variables have maximum 6 levels and with the use of the __sapply__ function we get the result above of the required variables then we select the chosen variables from the dataframe.  
+
+```{r}
+pca_df=df[,sapply(df,discrete)]
+head(pca_df)
+```
+as u can see, the first 5 columns are string categorical variables and the PCA function works on the numerical variables so if we apply the __as.numeric__ function directly on the dataframe, all the string variables will become __NAs__.  
+So my solution was to apply firstly __as.factor__ then apply the __as.numeric__, that way, all the string categorical variables will be numeric categorical automatically.  
+
+```{r}
+pca_df[]=lapply(pca_df,factor)
+pca_df[]=lapply(pca_df,as.integer)
+head(pca_df)
+```
+
+and the problem is solved but we have another problem which the large number of rows *(129880)* that may cause a problem for the PCA function so it is required to make changes on the data to make it easier.  
+
+```{r}
+pca_df2=summaryBy(.~ satisfaction+Gender+Customer.Type+Type.of.Travel+Class,data = pca_df,FUN=c(mean),keep.names = TRUE)
+dim(pca_df2)
+```
+Now we have a huge reduction of the large number of rows which is __43__ now. 
+and the data is ready for applying the __PCA__ function.
+
+```{r}
+c=cor(pca_df2)
+corrplot(c, type="upper", order="hclust",col=brewer.pal(n=8, name="RdBu"))
+```
+
+using the correlation plot, we remark some interesting correlations between some variables.  
+
+
+```{r}
+acp=PCA(pca_df2,quali.sup = c(1:5),graph=F)
+acp$eig
+fviz_screeplot(acp, ncp=10)
+```
+for this PCA, we will be taking 5 axes for better clustering results later.  
+
+```{r}
+fviz_pca_ind(acp)
+fviz_pca_var(acp)
+```
+For now, we could not interpret anything and we need to perform some clustering methods for better results.
+
+## Clustering methods
+
+### determine the best number of classes
+
+for this part, we will be using the __NbClust__ method.  
+```{r}
+NbClust(acp$ind$coord,method='ward.D')$Best.partition
+```
+As the function gives, the best number of classes is __4__.  
+
+
+
+### Hierarchical clustering
+
+```{r}
+d=dist(acp$ind$coord)
+clust=hclust(d,method="ward.D")
+dend=as.dendrogram(clust)
+plot(dend)
+```
+by the graph, the number of classes is between __2__ or __4__. but we will be using the result of the __NbClust__ function.
+
+```{r}
+clusters=cutree(clust,k=4)
+df_final=cbind(pca_df2,Classes=as.factor(clusters))
+fviz_pca_ind(acp,col.ind=df_final$Classes)
+```
+
+
+### K-Means
+
+
+This is the second method of clustering.  
+
+```{r}
+km=kmeans(as.matrix(df_final), centers = 4)
+km
+```
+### Comparing the two methods
+
+In order to compare the two method, we have to compare the result of clustering, for that reason we will be using the __table__ function
+
+```{r}
+table(km$cluster,clusters)
+```
+as we can see, the two method gave the exact same results, just with different names. which make this distribution a perfect one.
+
+## Interpreting the results
+for this part, we will use the __catdes__ function.  
+
+```{r}
+catdes(df_final,num.var = length(df_final))
+```
+
+__Class 1__ : represents the customers who are slightly dissatisfied but the have a little bit of satisfaction just because it is for __personal travel__.  
+__Class 2__ : represents the customers who are disappointed and totally dissatisfied with everything in the flight  
+__Class 3__ : represents the customers who are slightly satisfied with the flight and some of its services.  
+__Class 4__ : represents the customers who are fully satisfied with everything in the flight and all its pre-flight services and this class is for the __loyal customers__.  
+
+# Regression
+
+## Train / Test data split
+
+in this part we will split the whole data in two parts, one for training the model and the other for testing it.  
+as we almost have __130000__ observations in the dataframe so will have __100000__ for training and the rest for testing.  
+
+```{r}
+x=sample(c(1:nrow(df)),100000)
+
+df_train=df[x,]
+df_test=df[-x,]
+
+nrow(df_train)
+nrow(df_test)
+```
+
+
+## Logistic Regression
+
+In this part we will use the __step__ function to estimate the best equation to use on the __glm__ model.
+
+```{r}
+df_train$satisfaction=as.factor(ifelse(df_train$satisfaction=='satisfied',1,0))
+df_test$satisfaction=as.factor(ifelse(df_test$satisfaction=='satisfied',1,0))
+modele_glm=glm(satisfaction ~ .,family='binomial',df_train)
+step(modele_glm,direction='both')
+```
+
+
+As we can see the result the __step__ function, it kept all the given variables as they are all dependent to the target variable. So we will keep the model as it is and we will proceed to the prediction function.  
+
+```{r}
+pred_glm=predict(modele_glm,df_test,type='response')
+pred_glm=ifelse(pred_glm>0.5,1,0)
+tab=table(df_test$satisfaction,pred_glm)
+print(paste("The accuracy = ",(tab[1,1]+tab[2,2])/sum(tab)))
+print(paste("The precision = ",tab[2,2]/(tab[1,2]+tab[2,2])))
+```
+here is the result of the prediction shows that the accuracy and the precision of the model are more than __80%__ which is high enough to accept the model.  
+And here is the AUC graph of the __glm__ model.  
+
+```{r}
+pred=predict(modele_glm,df_test,type="response")
+predicted=prediction(pred,df_test$satisfaction)
+roc=performance(predicted, "tpr","fpr")
+plot(roc)
+auc=performance(predicted, "auc")
+auc@y.values
+proc=performance(predicted, "prec","rec")
+plot(proc)
+aucpr=performance(predicted, "aucpr")
+aucpr@y.values
+```
+## Factorial Discriminant Analysis
+
+Here is another method to make a model for prediction of the target variable with the factorial discriminant analysis using the __lda__ function. 
+
+```{r}
+modele_lda=lda(satisfaction ~ .,df_train)
+pred_lda=predict(modele_lda,prior=c(0.5,0.5),df_test)
+tab=table(df_test$satisfaction,pred_lda$class)
+print(paste("The accuracy = ",(tab[1,1]+tab[2,2])/sum(tab)))
+print(paste("The precision = ",tab[2,2]/(tab[1,2]+tab[2,2])))
+```
+This model gives an accuracy and precision also above __80%__ which means that this model is accurate as well. 
+
+
+```{r}
+predicted=prediction(pred_lda$posterior[,2],df_test$satisfaction)
+roc=performance(predicted, "tpr","fpr")
+plot(roc)
+auc=performance(predicted, "auc")
+auc@y.values
+proc=performance(predicted, "prec","rec")
+plot(proc)
+aucpr=performance(predicted, "aucpr")
+aucpr@y.values
+```
+
+
+
+## Decision Tree  
+in this part we will create a decision tree model  
+```{r}
+rc=rpart.control(minsplit = 20)
+tree=rpart(satisfaction~.,data=df_train,method="class",control = rc)
+pred_tree=predict(tree,df_test,type = "class")
+rpart.plot(tree,extra = 106)
+tab=table(df_test$satisfaction,pred_tree)
+print(paste("The accuracy = ",(tab[1,1]+tab[2,2])/sum(tab)))
+print(paste("The precision = ",tab[2,2]/(tab[1,2]+tab[2,2])))
+```
+
+```{r}
+pred=predict(tree,df_test,type = "prob")[,2]
+predicted=prediction(pred,df_test$satisfaction)
+roc=performance(predicted, "tpr","fpr")
+plot(roc)
+auc=performance(predicted, "auc")
+auc@y.values
+proc=performance(predicted, "prec","rec")
+plot(proc)
+aucpr=performance(predicted, "aucpr")
+aucpr@y.values
+```
+
+
+
+## RandomForest
+
+```{r}
+tuneRF(df_train[setdiff(colnames(df_train),"satisfaction")],df_train$satisfaction,stepFactor=1.5,mtryStart=2, improve=0.01,ntree=20,trace=F) 
+```
+As the __tuneRF__ function gives, its optimal to use __9__ mtry variables as it has the least OOB error.  
+Now we will apply a random forest model:  
+
+```{r}
+modele_rf=randomForest(satisfaction~.,data=df_train,ntree=20,mtry=9)
+pred=predict(modele_rf,df_test,type="class")
+tab=table(df_test$satisfaction,pred)
+print(paste("The accuracy = ",(tab[1,1]+tab[2,2])/sum(tab)))
+print(paste("The precision = ",tab[2,2]/(tab[1,2]+tab[2,2])))
+```
+As you can see, we have a __95%__ accuracy of the model and __96%__ precision, which are really high and acceptable.   
+```{r}
+varImpPlot(modele_rf)
+```
+this graph shows the most important variables in the classification model and it shows that __Inflight entertainment__ is the most crucial variable and that's what we saw with the decision tree.  
+And lastly we represent the AUC plot of this model.  
+```{r}
+pred=predict(modele_rf,df_test,type="prob")[,2]
+predicted=prediction(pred,df_test$satisfaction)
+roc=performance(predicted, "tpr","fpr")
+plot(roc)
+auc=performance(predicted, "auc")
+auc@y.values
+proc=performance(predicted, "prec","rec")
+plot(proc)
+aucpr=performance(predicted, "aucpr")
+aucpr@y.values
+
+```
